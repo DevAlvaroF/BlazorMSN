@@ -1,0 +1,175 @@
+﻿@page "/"
+@using BlazorMSN.Core.ServiceContracts;
+@using BlazorMSN.Core.Services;
+@using Microsoft.AspNetCore.SignalR.Client;
+@using BlazorMSN.UI.Data;
+@using BlazorMSN.UI.Models;
+@using BlazorMSN.Core.DTO;
+
+@* ==========  INJECTIONS =========== *@
+
+@inject NavigationManager _navigationManager
+@implements IAsyncDisposable
+@inject IUserAdderService _userAdderService
+@inject IUserDeleterService _userDeleterService
+
+<div class="top-row px-4">
+	@if (chatting)
+	{
+		<p>You are connected as <b>@currentUserName</b></p>
+		@*<button class="btn btn-sm btn-warning" @onclick="DisposeAsync">Disconnect</button>*@
+		<a class="link-info" href="/">Logout</a>
+	}
+</div>
+
+
+<h2>Blazor MSN</h2>
+
+@* Register Name First*@
+@if (!chatting)
+{
+	<p>Enter your name to start chatting</p>
+	<div class="form-group">
+		<input type="text" class="form-control" maxlength="32" @bind="currentUserName" placeholder="Write your User Name" />
+		<button style="margin-top: 20px;" class="btn btn-success" @onclick="StartChat">Chat!</button>
+	</div>
+	@if (!string.IsNullOrEmpty(loginErrorMessage))
+	{
+		<div class="invalid-feedback">@loginErrorMessage</div>
+		<small id="emailHelp" class="form-text text-muted">@loginErrorMessage</small>
+	}
+}
+
+@if (chatting)
+{
+	@*<div class="chat-container" style="height:400px;">*@
+	<div class="container overflow-auto shadow-sm p-3 mb-5 rounded" style="height:400px; background-color:#edf2ff;">
+		<ul class="chat">
+			@foreach (MessageModel message in messages)
+			{
+				<li class="message @message.CSS">
+					<div style="display:flex; justify-content:space-between">
+						<p class="user">@message.UserName</p>
+						<img class="logo" src="/images/@(message.genericImageId).png" alt="">
+					</div>
+					<p class="user">@message.Body</p>
+					<p class="time">@message.DateSent.ToString("HH:mm")</p>
+				</li>
+			}
+		</ul>
+	</div>
+
+	<div class="container">
+		<div class="row">
+			<div class="col">
+
+				<textarea class="form-control" @bind="inputMessage" placeholder="Write something..."></textarea>
+			</div>
+			<div class="col-3">
+
+				<button class="btn btn-secondary" @onclick="Send">Send</button>
+			</div>
+		</div>
+
+	</div>
+}
+
+
+@code {
+	// Chatting and Username
+	bool chatting = false;
+	string currentUserName = string.Empty;
+	private Guid currentUserId = Guid.Empty;
+	string currentImageIdx;
+	// Messages
+	string inputMessage = string.Empty;
+	string loginErrorMessage = string.Empty;
+
+	// List of all messages
+	List<MessageModel> messages = new List<MessageModel>();
+	private HubConnection _hubConnection;
+
+	protected override async Task OnInitializedAsync()
+	{
+		messages.Clear();
+		// Build Connection on the HubUrl
+		_hubConnection = new HubConnectionBuilder().WithUrl(_navigationManager.ToAbsoluteUri("/chathub")).Build();
+
+		// Bind to method defined in ChatHub.cs
+		_hubConnection.On<Guid, string, string, string>(ChatClientDefaultParams.RECEIVE, (userId, message, userName, imageId) =>
+		{
+			// ===================================
+			// Add incoming message
+			//= ==================================
+
+			// Add MEssage
+			messages.Add(new MessageModel()
+				{
+					UserName = userName,
+					Body = message,
+					DateSent = DateTime.Now,
+					Mine = (userId == currentUserId),
+					genericImageId = imageId
+				});
+
+
+
+			StateHasChanged();
+		});
+
+		// Wait for hub to start connection
+		await _hubConnection.StartAsync();
+
+
+	}
+
+	public async void Send()
+	{
+		if (!string.IsNullOrEmpty(inputMessage))
+		{
+			await _hubConnection.SendAsync(ChatClientDefaultParams.SEND, currentUserId, inputMessage, currentUserName, currentImageIdx);
+
+			inputMessage = string.Empty;
+		}
+
+	}
+
+	public async ValueTask DisposeAsync()
+	{
+		if (_hubConnection is not null)
+		{
+			bool resultDelete = await _userDeleterService.DeleteUser(currentUserId);
+			await _hubConnection.DisposeAsync();
+		}
+	}
+
+	async Task StartChat()
+	{
+
+		if (string.IsNullOrWhiteSpace(currentUserName))
+		{
+			loginErrorMessage = "Please enter a name";
+			return;
+		}
+
+		// TO DO: Add to UserMessage List
+		UserResponse responseAdded = await _userAdderService.AddUser(new UserAddRequest()
+			{
+				ConnectionId = Guid.NewGuid(),
+				UserName = currentUserName,
+			});
+
+		//Add Response to current storage
+		currentUserId = responseAdded.ConnectionId;
+		currentImageIdx = Convert.ToString(responseAdded.imageIndex);
+
+		chatting = true;
+		loginErrorMessage = string.Empty;
+	}
+
+
+
+
+
+
+}
