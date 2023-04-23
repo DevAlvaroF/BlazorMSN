@@ -1,3 +1,3 @@
 # BlazorMSN
 
-VIDEOÑ https://youtu.be/4ZM45mUV_lw
+VIDEO https://youtu.be/4ZM45mUV_lw
